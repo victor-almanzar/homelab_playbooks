@@ -1,0 +1,14 @@
+# hosts.j2
+
+# Loopback entries; do not change.
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+
+# Managed by Ansible - All hosts in inventory
+{% for host in groups['all'] %}
+{% if hostvars[host]['ansible_host'] is defined %}
+{{ hostvars[host]['ansible_host'] }}    {{ host }}
+{% endif %}
+{% endfor %}
+
+# vim: set ft=conf

@@ -1,0 +1,5 @@
+[Volume]
+VolumeName=forgejo-data
+Label=app=forgejo
+
+# vim: ft=systemd

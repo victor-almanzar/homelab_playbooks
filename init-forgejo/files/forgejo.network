@@ -1,0 +1,8 @@
+[Network]
+NetworkName=forgejo
+Driver=bridge
+Internal=false
+IPv6=true
+Label=app=forgejo
+
+# vim: ft=systemd

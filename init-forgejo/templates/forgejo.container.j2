@@ -1,0 +1,27 @@
+[Unit]
+Description=Forgejo Git Service
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=forgejo
+Image=codeberg.org/forgejo/forgejo:9
+AutoUpdate=registry
+Pull=newer
+Timezone=local
+Environment=USER_UID=1000
+Environment=USER_GID=1000
+Network=forgejo.network
+PublishPort="{{ hostvars[groups['main_server'][0]]['ansible_host'] }}:3000:3000/tcp"
+PublishPort="{{ hostvars[groups['main_server'][0]]['ansible_host'] }}:222:22/tcp"
+Volume=forgejo-data:/data:Z
+UserNS=keep-id
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target
+
+# vim: ft=jinja

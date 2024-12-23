@@ -1,0 +1,72 @@
+# deploy-forgejo.yml
+---
+- name: Deploy Forgejo with Podman Quadlet
+  hosts: fed01
+  become: true
+  vars:
+    server_ip: "{{ hostvars[groups['main_server'][0]]['ansible_host'] }}"
+
+  pre_tasks:
+    - name: Ensure packages are up to date
+      dnf5:
+        name: "*"
+        state: latest
+        update_cache: yes
+
+    - name: Ensure Podman and lib-dnf5 is installed
+      dnf5:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - "@container-management"
+        - python3-libdnf5
+
+  tasks:
+    - name: Ensure systemd quadlet directory exists
+      file:
+        path: /etc/containers/systemd
+        state: directory
+        mode: '0755'
+
+    - name: Deploy Quadlet configuration files
+      copy:
+        src: "{{ item }}"
+        dest: "/etc/containers/systemd/{{ item }}"
+        mode: '0644'
+      loop:
+        - forgejo.network
+        - forgejo-data.volume
+
+    - name: Deploy .container file
+      template:
+        src: forgejo.container
+        dest: "/etc/containers/systemd/{{ item }}"
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Forgejo service
+      systemd:
+        name: forgejo
+        enabled: yes
+        state: started
+
+    - name: Wait for Forgejo to be available
+      uri:
+        url: "http://{{ server_ip }}:3000"
+        method: GET
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 60
+      delay: 5
+      ignore_errors: yes
+
+    - name: Display installation completion message
+      debug:
+        msg: |
+          Forgejo has been installed and should be accessible at:
+          - Web UI: http://{{ server_ip }}:3000
+          - SSH: ssh -F /dev/null git@localhost -p 222

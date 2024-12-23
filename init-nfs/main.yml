@@ -1,0 +1,102 @@
+---
+- name: Configure NFS Server
+  hosts: main_server
+  become: true
+  gather_facts: true
+  vars:
+      storage_pools:
+        - name: fedora
+          type: lvm
+          volumes:
+            - name: nfs
+              size: 30g
+              fs_type: xfs
+              mount_point: /srv/nfs
+              thin: true
+              thin_pool_name: srv
+              thin_pool_size: 40g
+              state: present
+              mount_user: "{{ ansible_env.SUDO_USER }}"
+              mount_group: "{{ ansible_env.SUDO_USER }}"
+              mount_mode: "0755"
+
+  pre_tasks:
+    - name: Ensure packages are up to date
+      dnf5:
+        name: "*"
+        state: latest
+        update_cache: yes
+
+    - name: Ensure python-libdnf5 is installed
+      ansible.builtin.dnf5:
+        name: python-libdnf5
+        state: present
+
+  tasks:
+    - name: Include storage role
+      include_role:
+        name: linux-system-roles.storage
+
+    - name: Set directory ownership and permissions
+      ansible.builtin.file:
+        path: /srv/nfs
+        owner: "{{ ansible_env.SUDO_USER }}"
+        group: "{{ ansible_env.SUDO_USER }}"
+        mode: "0755"
+        state: directory
+
+    - name: Set network facts
+      set_fact:
+        network_addr: "{{ ansible_default_ipv4.network }}"
+        network_prefix: "{{ ansible_default_ipv4.prefix }}"
+        nfs_options: "(rw,sync,no_root_squash,fsid=0)"
+
+
+    - name: Configure NFS exports
+      ansible.builtin.lineinfile:
+        path: /etc/exports
+        line: "/srv/nfs {{ network_addr }}/{{ network_prefix }}{{ nfs_options }}"
+        create: true
+        mode: "0644"
+
+    - name: reload nfs
+      ansible.builtin.command: exportfs -ra
+
+    - name: Configure firewall for NFS
+      ansible.posix.firewalld:
+        service: nfs
+        permanent: true
+        state: enabled
+        immediate: true
+
+    - name: Enable and start NFS server
+      ansible.builtin.systemd:
+        name: nfs-server
+        state: started
+        enabled: true
+
+- name: Configure NFS Clients
+  hosts: clients
+  gather_facts: true
+  become: true
+  vars:
+    nfs_server_ip: "{{ hostvars[groups['main_server'][0]]['ansible_host'] }}"
+    home_base: "{{ '/var/home' if ansible_pkg_mgr == 'atomic_container' else '/home' }}"
+    share_mount_point: "{{ home_base }}/{{ ansible_env.SUDO_USER }}/Share"
+
+  tasks:
+    - name: Create mount point directory
+      ansible.builtin.file:
+        path: "{{ share_mount_point }}"
+        state: directory
+        owner: "{{ ansible_env.SUDO_USER }}"
+        group: "{{ ansible_env.SUDO_USER }}"
+        mode: "0755"
+
+    - name: Configure NFS mount
+      ansible.posix.mount:
+        path: "{{ share_mount_point }}"
+        src: "{{ nfs_server_ip }}:/"
+        fstype: nfs4
+        opts: defaults,_netdev
+        state: mounted

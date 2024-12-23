@@ -1,0 +1,95 @@
+# main.yml
+---
+- name: Configure Homelab SSH Environment
+  hosts: all
+  become: true
+  vars_files:
+    # Save your github token to a file
+    - ~/.ansible/vault/github.yml
+
+  pre_tasks:
+    - name: Remove all existing SSH keys from GitHub for hosts
+      community.general.github_key:
+        name: "{{ item }}"
+        token: "{{ github_token }}"
+        state: absent
+        force: true
+      delegate_to: localhost
+      run_once: true
+      when: github_token is defined
+      with_items: "{{ groups['all'] }}"
+
+    - name: Ensure local tmp/ssh_keys directory exists
+      file:
+        path: "tmp/ssh_keys"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_env.SUDO_USER }}"
+        group: "{{ ansible_env.SUDO_USER }}"
+      delegate_to: localhost
+      run_once: true
+
+  tasks:
+    - name: Set hostname based on inventory_hostname
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Update /etc/hosts file
+      template:
+        src: templates/hosts.j2
+        dest: /etc/hosts
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Ensure .ssh directory exists with correct permissions
+      file:
+        path: "/home/{{ ansible_env.SUDO_USER }}/.ssh"
+        state: directory
+        mode: '0700'
+        owner: "{{ ansible_env.SUDO_USER }}"
+        group: "{{ ansible_env.SUDO_USER }}"
+
+    - name: Remove existing SSH files
+      file:
+        path: "/home/{{ ansible_env.SUDO_USER }}/.ssh/{{ item }}"
+        state: absent
+      with_items:
+        - "id_ed25519"
+        - "id_ed25519.pub"
+        - "authorized_keys"
+        - "known_hosts"
+        - "known_hosts.old"
+
+    - name: Generate new SSH key pairs
+      openssh_keypair:
+        path: "/home/{{ ansible_env.SUDO_USER }}/.ssh/id_ed25519"
+        type: "ed25519"
+        owner: "{{ ansible_env.SUDO_USER }}"
+        group: "{{ ansible_env.SUDO_USER }}"
+        mode: '0600'
+
+    - name: Fetch all public keys
+      fetch:
+        src: "/home/{{ ansible_env.SUDO_USER }}/.ssh/id_ed25519.pub"
+        dest: "tmp/ssh_keys/{{ inventory_hostname }}.pub"
+        flat: yes
+
+    - name: Create authorized_keys file with all public keys
+      authorized_key:
+        user: "{{ ansible_env.SUDO_USER }}"
+        key: "{{ lookup('file', 'tmp/ssh_keys/' + item + '.pub') }}"
+        state: present
+      with_items: "{{ groups['all'] }}"
+
+    - name: Add SSH key to GitHub
+      community.general.github_key:
+        name: "{{ inventory_hostname }}"
+        pubkey: "{{ lookup('file', 'tmp/ssh_keys/' + inventory_hostname + '.pub') }}"
+        token: "{{ github_token }}"
+        state: present
+        force: true
+      delegate_to: localhost
+      when: github_token is defined
+
+# vim: filetype=yaml.ansible
